@@ -50,7 +50,6 @@ def predict(data, model):
 
 
 def eval_metrics_on(predictions, labels):
-    print(predictions.shape)
     labels = labels.flatten()
 
     '''
@@ -213,7 +212,8 @@ def train_model(model, train_data, valid_data, test_data,
     set_model_params(model, model_params_at_best_valid)
     train_labels = []
     for d in train_data:
-        train_labels.append(d[2])
+        for x in d[2]:
+            train_labels.append(x)
     train_labels = np.array(train_labels)
     val_labels = []
     for d in valid_data:
@@ -223,6 +223,9 @@ def train_model(model, train_data, valid_data, test_data,
     for d in test_data:
         test_labels.append(d[2])
     test_labels = np.array(test_labels)
+
+    print(train_labels.shape)
+    print(predict(train_data,model).shape)
 
     training_data_scores   = eval_metrics_on(predict(train_data,model), train_labels)
     validation_data_scores = eval_metrics_on(predict(valid_data,model), val_labels)
@@ -258,7 +261,7 @@ def crossvalidation_example(use_matrix_based_implementation = False):
     
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~
-    num_epochs = 2
+    num_epochs = 170
     batchsize  = 20   #batch size for training
     L2_reg     = 4e-3
     batch_normalization = 0
