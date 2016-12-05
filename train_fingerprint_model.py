@@ -7,7 +7,8 @@ The model is specified inside the main() function, which is a demonstration of t
 
 """
 from __future__ import print_function
-
+from __future__ import absolute_import
+from __future__ import division
 import time
 import numpy as np
 import sklearn.metrics as metrics
@@ -15,13 +16,103 @@ import sklearn.metrics as metrics
 import warnings
 
 import keras.backend as backend
-
+from keras.models import Sequential
+from keras.layers import Dense, Dropout, Activation
+from keras.optimizers import SGD
+import keras.optimizers as optimizers
 import KerasNeuralfingerprint.utils as utils
 import KerasNeuralfingerprint.data_preprocessing as data_preprocessing
 import KerasNeuralfingerprint.fingerprint_model_matrix_based as fingerprint_model_matrix_based
 import KerasNeuralfingerprint.fingerprint_model_index_based as fingerprint_model_index_based
+from KerasNeuralfingerprint.fingerprint_model_matrix_based_predict import regression_frozen, generate_smiles
 from sets import Set
+from rdkit import Chem
+from rdkit.Chem.MolSurf import _pyTPSA
 
+
+import numpy as np
+
+import types as python_types
+import warnings
+import copy
+import os
+import inspect
+from six.moves import zip
+
+
+
+
+def load_weights_by_name(model, filepath):
+        '''Loads all layer weights from a HDF5 save file.
+
+        If `by_name` is False (default) weights are loaded
+        based on the network's topology, meaning the architecture
+        should be the same as when the weights were saved.
+        Note that layers that don't have weights are not taken
+        into account in the topological ordering, so adding or
+        removing layers is fine as long as they don't have weights.
+
+        If `by_name` is True, weights are loaded into layers
+        only if they share the same name. This is useful
+        for fine-tuning or transfer-learning models where
+        some of the layers have changed.
+        '''
+        import h5py
+        f = h5py.File(filepath, mode='r')
+        if 'layer_names' not in f.attrs and 'model_weights' in f:
+            f = f['model_weights']
+        model.load_weights_from_hdf5_group_by_name(f)
+
+        if hasattr(f, 'close'):
+            f.close()
+
+def load_weights_from_hdf5_group_by_name(model, f):
+        ''' Name-based weight loading
+        (instead of topological weight loading).
+        Layers that have no matching name are skipped.
+        '''
+        if hasattr(model, 'flattened_layers'):
+            # Support for legacy Sequential/Merge behavior.
+            flattened_layers = model.flattened_layers
+        else:
+            flattened_layers = model.layers
+
+        if 'nb_layers' in f.attrs:
+                raise Exception('The weight file you are trying to load is' +
+                                ' in a legacy format that does not support' +
+                                ' name-based weight loading.')
+        else:
+            # New file format.
+            layer_names = [n.decode('utf8') for n in f.attrs['layer_names']]
+
+            # Reverse index of layer name to list of layers with name.
+            index = {}
+            for layer in flattened_layers:
+                if layer.name:
+                    index.setdefault(layer.name, []).append(layer)
+
+            # We batch weight value assignments in a single backend call
+            # which provides a speedup in TensorFlow.
+            weight_value_tuples = []
+            for k, name in enumerate(layer_names):
+                g = f[name]
+                weight_names = [n.decode('utf8') for n in g.attrs['weight_names']]
+                weight_values = [g[weight_name] for weight_name in weight_names]
+
+                for layer in index.get(name, []):
+                    symbolic_weights = layer.weights
+                    if len(weight_values) != len(symbolic_weights):
+                        raise Exception('Layer #' + str(k) +
+                                        ' (named "' + layer.name +
+                                        '") expects ' +
+                                        str(len(symbolic_weights)) +
+                                        ' weight(s), but the saved weights' +
+                                        ' have ' + str(len(weight_values)) +
+                                        ' element(s).')
+                    # Set values.
+                    for i in range(len(weight_values)):
+                        weight_value_tuples.append((symbolic_weights[i], weight_values[i]))
+            backend.batch_set_value(weight_value_tuples)
 
 
 def lim(float, precision = 5):
@@ -112,8 +203,7 @@ def save_model_weights(model, filename = 'fingerprint_model_weights.npz'):
 def load_model_weights(model, filename = 'fingerprint_model_weights.npz'):
     ws = np.load(filename)
     set_model_params(model, ws[ws.keys()[0]])
-    
-    
+
 
 def update_lr(model, initial_lr, relative_progress, total_lr_decay):
     """
@@ -261,7 +351,7 @@ def crossvalidation_example(use_matrix_based_implementation = False):
     
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~
-    num_epochs = 170
+    num_epochs = 1
     batchsize  = 20   #batch size for training
     L2_reg     = 4e-3
     batch_normalization = 0
@@ -282,7 +372,7 @@ def crossvalidation_example(use_matrix_based_implementation = False):
     # select the data that will be loaded or provide different data
     smilesarrays = []
     
-    data, labels = utils.filter_data(utils.load_delaney, data_cache_name='data/delaney')
+    data, labels = utils.filter_data(utils.load_delaney)
     maxlength = -1
     chardict = {}
     count = 1
@@ -378,7 +468,7 @@ def crossvalidation_example(use_matrix_based_implementation = False):
             print('Test-set',k,'=',lim(v))
                 
     
-    return model #this is the last trained model
+    return model, test_data, chardict #this is the last trained model
     
     
     
@@ -389,19 +479,77 @@ if __name__=='__main__':
     # Two implementations are available (they are equivalent): index_based and matrix_based. 
     # The index_based one is usually slightly faster.    
     
-    model = crossvalidation_example(use_matrix_based_implementation=1)
+    model, test_data, chardict = crossvalidation_example(use_matrix_based_implementation=1)
+    chardict_rev = {}
+    for key in chardict:
+        chardict_rev[chardict[key]] = key
+    chardict_rev[0] = ''
+    
+    model.save_weights('trained_model.txt')
+
+
+
+    total_loss = 0
+    for a in range(1):
+        for b in range(20):
+            print(b)
+            model = regression_frozen()
+            load_weights_by_name(model, 'trained_model.txt')
+
+            ones_input = []
+            test_labels = []
+            for i in range(20):
+                test_labels.append(test_data[0][2][0])
+                ones_input.append([1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
+            ones_input = np.array(ones_input)
+            test_labels = np.array(test_labels)
+
+            for i in range(0):
+                model.train_on_batch(ones_input, test_labels)
+            for layer in model.layers:
+                if layer.name == 'getsample':
+                    optmatrix = layer.get_weights()
+
+            model = generate_smiles(optmatrix)
+            load_weights_by_name(model, 'trained_model.txt')
+            loss = model.train_on_batch(np.reshape(np.array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1]), (1, 10)), np.reshape(np.array(test_data[0][1][0]), (1, 3234)))
+            total_loss = total_loss + loss
+    print(total_loss / 20)
+    '''
+    smiles_gen = model.predict(np.reshape(np.array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1]), (1, 10)))
+    smiles_gen = np.reshape(smiles_gen, (98, 33))
+    actual = np.reshape(test_data[0][1][0], (98, 33))
+    smiles = ""
+    for whichchar in range(len(smiles_gen)):
+        smiles += chardict_rev[np.argmax(smiles_gen[whichchar])]
+    print(smiles)
+    actualsmiles = ""
+    for whichchar in range(len(actual)):
+        actualsmiles += chardict_rev[np.argmax(actual[whichchar])]
+    print(actualsmiles)
+    mol = Chem.MolFromSmiles(smiles)
+    print(_pyTPSA(mol) - test_data[0][1][0])
+    '''
+
+
+
+
+
+    #model.fit(zeros_input, train_labels)
+
+    
     
     
     # to save the model weights use e.g.:
-    save_model_weights(model, 'trained_fingerprint_model.npz')
+    #save_model_weights(model, 'trained_fingerprint_model.npz')
     
     # to load the saved model weights use e.g.:
-    load_model_weights(model, 'trained_fingerprint_model.npz')
+    #load_model_weights(model, 'trained_fingerprint_model.npz')
     
     
     #this saves an image of the network's computational graph (an abstract form of it)
     # beware that this requires the 'graphviz' software!
-    save_model_visualization(model, filename = 'fingerprintmodel.png')
+    #save_model_visualization(model, filename = 'fingerprintmodel.png')
 
 
 

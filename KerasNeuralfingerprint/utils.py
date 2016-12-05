@@ -54,7 +54,8 @@ def permute_data(data, labels=None, FixSeed=None, return_permutation=False, perm
 
 
 
-def load_delaney(file = 'data/delaney.csv', target_name = 'measured log solubility in mols per litre'):
+def load_delaney(file = 'data/delaney.csv', target_name = 'Molecular Weight'):
+    print("ESATNSRETISR")
     '''
     returns: data, labels
     '''
@@ -179,9 +180,7 @@ def filter_data(data_loading_function, data_cache_name = 'default_data_cache/'):
         data = np.array(data)
         labels = np.array(labels)
         
-        if data_cache_name is not None:
-            np.save(data_cache_name+'_data.npy', data)
-            np.save(data_cache_name+'_labels.npy', labels)
+
     return data, labels
         
 

@@ -112,7 +112,8 @@ def build_fingerprint_regression_model(fp_length = 50, fp_depth = 4, conv_width 
     
     z_mean = layers.Dense(latent_size, activation='linear', name='zmean')(neural_fingerprint)
     z_logvar = layers.Dense(latent_size, activation='linear', name='zvar')(neural_fingerprint)
-    Prediction_MLP_layer =   layers.Lambda(sampling, output_shape=(latent_size,), name='lambda')([z_mean, z_logvar])
+    sample =   layers.Lambda(sampling, output_shape=(latent_size,), name='lambda')([z_mean, z_logvar])
+    Prediction_MLP_layer = sample
     
     
     for i, hidden in enumerate(predictor_MLP_layers):
@@ -122,7 +123,8 @@ def build_fingerprint_regression_model(fp_length = 50, fp_depth = 4, conv_width 
 
 
     reconstruction = layers.Dense(98*33, activation='sigmoid', name='reconstruction')(Prediction_MLP_layer)
-    regression = layers.Dense(1, activation='linear', name='regression')(Prediction_MLP_layer)
+    regression = layers.Dense(100, activation='relu', name='regression')(sample)
+    regression = layers.Dense(1, activation='linear', name='regression2')(regression)
     print("AAA")
     print(reconstruction.get_shape())
 
@@ -132,7 +134,7 @@ def build_fingerprint_regression_model(fp_length = 50, fp_depth = 4, conv_width 
         return xent_loss + kl_loss
 
     model = models.Model(input=inputs.values(), output=[regression, reconstruction])
-    model.compile(optimizer=optimizers.Adam(), loss={'reconstruction':vae_loss, 'regression':'mse'}, metrics={'reconstruction':'binary_crossentropy'})
+    model.compile(optimizer=optimizers.Adam(), loss={'reconstruction':vae_loss, 'regression2':'mse'}, metrics={'reconstruction':'binary_crossentropy'})
     return model
 
 
