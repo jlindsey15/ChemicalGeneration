@@ -4,6 +4,7 @@ import keras.regularizers as regularizers
 import keras.models as models
 import keras.layers as layers
 import keras.backend as backend
+import keras.objectives
 
 degrees = range(1,5)
 
@@ -60,7 +61,7 @@ def neural_fingerprint_layer(inputs, atom_features_of_previous_layer, num_atom_f
 
 
 def build_fingerprint_regression_model(fp_length = 50, fp_depth = 4, conv_width = 20, 
-                                             predictor_MLP_layers = [200, 200, 200], 
+                                             predictor_MLP_layers = [200, 200, 200],
                                              L2_reg = 4e-4, num_input_atom_features = 62, 
                                              num_bond_features = 6, batch_normalization = False):
     """
@@ -101,19 +102,37 @@ def build_fingerprint_regression_model(fp_length = 50, fp_depth = 4, conv_width 
         # This is the actual fingerprint, we will feed it into an MLP for prediction  -- shape is (batch_size, fp_length)
         neural_fingerprint = layers.merge(all_outputs_to_fingerprint, mode='sum') if len(all_outputs_to_fingerprint)>1 else all_outputs_to_fingerprint
 
+    latent_size = 10
     
-    Prediction_MLP_layer = neural_fingerprint
+    def sampling(args):
+        z_mean_, z_log_var_ = args
+        batch_size = backend.shape(z_mean_)[0]
+        epsilon = backend.random_normal(shape=(batch_size, latent_size), mean=0., std = 0.01)
+        return z_mean_ + backend.exp(z_log_var_ / 2) * epsilon
+    
+    z_mean = layers.Dense(latent_size, activation='linear', name='zmean')(neural_fingerprint)
+    z_logvar = layers.Dense(latent_size, activation='linear', name='zvar')(neural_fingerprint)
+    Prediction_MLP_layer =   layers.Lambda(sampling, output_shape=(latent_size,), name='lambda')([z_mean, z_logvar])
+    
     
     for i, hidden in enumerate(predictor_MLP_layers):
 
         Prediction_MLP_layer = layers.Dense(hidden, activation='relu', W_regularizer=regularizers.l2(L2_reg), name='MLP_hidden_'+str(i))(Prediction_MLP_layer)
         
 
-        
-    main_prediction = layers.Dense(1, activation='linear', name='main_prediction')(Prediction_MLP_layer)
 
-    model = models.Model(input=inputs.values(), output=[main_prediction])
-    model.compile(optimizer=optimizers.Adam(), loss={'main_prediction':'mse'})
+    reconstruction = layers.Dense(98*33, activation='sigmoid', name='reconstruction')(Prediction_MLP_layer)
+    regression = layers.Dense(1, activation='linear', name='regression')(Prediction_MLP_layer)
+    print("AAA")
+    print(reconstruction.get_shape())
+
+    def vae_loss(x, x_decoded_mean):
+        xent_loss = keras.objectives.binary_crossentropy(x, x_decoded_mean)
+        kl_loss = - 0.5 * backend.mean(1 + z_logvar - backend.square(z_mean) - backend.exp(z_logvar), axis=-1)
+        return xent_loss + kl_loss
+
+    model = models.Model(input=inputs.values(), output=[regression, reconstruction])
+    model.compile(optimizer=optimizers.Adam(), loss={'reconstruction':vae_loss, 'regression':'mse'}, metrics={'reconstruction':'binary_crossentropy'})
     return model
 
 

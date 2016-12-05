@@ -80,7 +80,7 @@ def load_Karthikeyan_MeltingPoints(file = 'ata/Melting_Points_(Karthikeyan).txt'
     
     
     
-def cross_validation_split(data, labels, crossval_split_index, crossval_total_num_splits, validation_data_ratio = 0.1):
+def cross_validation_split(data, labels, reg_labels, crossval_split_index, crossval_total_num_splits, validation_data_ratio = 0.1):
     '''
     Manages cross-validation splits given fixed lists of data/labels
     
@@ -105,14 +105,14 @@ def cross_validation_split(data, labels, crossval_split_index, crossval_total_nu
     
     start_test = crossval_split_index * n_test
     end_test = crossval_split_index * n_test + n_test
-    testdata = (data[start_test: end_test], labels[start_test: end_test])
+    testdata = (data[start_test: end_test], labels[start_test: end_test], reg_labels[start_test: end_test])
     
     rest_data   = np.concatenate((data[:start_test],data[end_test:]), axis=0)
     rest_labels = np.concatenate((labels[:start_test],labels[end_test:]), axis=0)
-    
+    rest_reg_labels = np.concatenate((reg_labels[:start_test],reg_labels[end_test:]), axis=0)
     n_valid   = int(N * validation_data_ratio)
-    valdata   = (rest_data[: n_valid], rest_labels[: n_valid])
-    traindata = (rest_data[n_valid: ], rest_labels[n_valid: ])
+    valdata   = (rest_data[: n_valid], rest_labels[: n_valid], rest_reg_labels[: n_valid])
+    traindata = (rest_data[n_valid: ], rest_labels[n_valid: ], rest_reg_labels[n_valid:])
     
     return traindata, valdata, testdata
 

@@ -20,8 +20,7 @@ import KerasNeuralfingerprint.utils as utils
 import KerasNeuralfingerprint.data_preprocessing as data_preprocessing
 import KerasNeuralfingerprint.fingerprint_model_matrix_based as fingerprint_model_matrix_based
 import KerasNeuralfingerprint.fingerprint_model_index_based as fingerprint_model_index_based
-
-from matplotlib import pyplot
+from sets import Set
 
 
 
@@ -34,12 +33,6 @@ def save_model_visualization(model, filename='model.png'):
     '''
     Requires the 'graphviz' software package
     '''
-    try:
-        from keras.utils.visualize_util import plot
-        plot(model, filename, show_shapes=1)
-    except:
-        import traceback
-        print('\nsave_model_visualization() failed with exception:',traceback.format_exc())
 
 
 
@@ -49,14 +42,15 @@ def predict(data, model):
     '''
     pred = []    
     for batch in data:
-        if len(batch)==2:
+        if len(batch)==3:
             batch = batch[0]
-        pred.append(model.predict_on_batch(batch))
+        pred.append(np.squeeze(model.predict_on_batch(batch)[0]))
     return np.concatenate(pred)
 
 
 
 def eval_metrics_on(predictions, labels):
+    print(predictions.shape)
     '''
     assuming this is a regression task; labels are continuous-valued floats
     
@@ -77,23 +71,6 @@ def eval_metrics_on(predictions, labels):
     return {'r2':r2, 'mean_abs_error':mean_abs_error, 'mse':mse, 'rmse':rmse, 
             'median_absolute_error':median_absolute_error, 
             'explained_variance_score':explained_variance_score}
-
-
-def parity_plot(predictions, labels):
-    try:
-        figure = pyplot.figure()
-    except:
-        print('parity_plot:: Error: Cannot create figure')
-        return
-    ax  = figure.add_subplot(111)
-    ax.set_axisbelow(True)
-    
-    ax.set_xlabel('True Value', fontsize=15)
-    ax.set_ylabel('Predicted', fontsize=15)
-    pyplot.grid(b=True, which='major', color='lightgray', linestyle='--')
-    pyplot.title('Parity Plot')
-    pyplot.scatter(labels, predictions, s=15, c='b', marker='o')
-    
     
 
 
@@ -105,7 +82,8 @@ def test_on(data, model, description='test_data score:'):
     weights =[]
     for v in data:
         weights.append(v[1].shape) # size of batch
-        scores.append( model.test_on_batch(x=v[0], y=v[1]))
+        loss, b, c, d = model.test_on_batch(x=v[0], y=[v[2], v[1]])
+        scores.append(loss)
     weights = np.array(weights)
     s=np.mean(np.array(scores)* weights/weights.mean())
     if len(description):
@@ -207,17 +185,26 @@ def train_model(model, train_data, valid_data, test_data,
             update_lr(model, initial_lr, epoch*1./num_epochs, total_lr_decay)
             batch_order = np.random.permutation(len(train_data))
             losses=[]
+            rec_losses = []
+            reg_losses = []
+            pure_rec_losses = []
             t0 = time.clock()
             for i in batch_order:
-                loss = model.train_on_batch(x=train_data[i][0], y=train_data[i][1], check_batch_dim=False)
+                loss, rec_loss, reg_loss, pure_rec_loss = model.train_on_batch(x=train_data[i][0], y=[train_data[i][2], train_data[i][1]], check_batch_dim=False)
                 losses.append(loss)
+                rec_losses.append(rec_loss)
+                reg_losses.append(reg_loss)
+                pure_rec_losses.append(pure_rec_loss)
             times.append(time.clock()-t0)
             val_mse = test_on(valid_data,model,'valid_data score:' if verbose>1 else '')
+            print(val_mse)
             if best_valid > val_mse:
                 best_valid = val_mse
                 model_params_at_best_valid = get_model_params(model) #kept in RAM (not saved to disk as that is slower)
             if verbose>0:
-                print('Epoch',epoch+1,'completed with average loss',lim(np.mean(losses)))
+                print('Epoch',epoch+1,'completed with average reg loss',lim(np.mean(reg_losses)))
+                print('Epoch',epoch+1,'completed with average pure rec loss',lim(np.mean(pure_rec_loss)))
+                print('Epoch',epoch+1,'completed with average pure kl loss',lim(np.mean(rec_losses) - np.mean(pure_rec_loss)))
             log_train_mse.append(np.mean(losses))
             log_validation_mse.append(val_mse)
             
@@ -230,7 +217,6 @@ def train_model(model, train_data, valid_data, test_data,
     #test_end   = test_on(test_data, model,'test  mse (final):     ')
     
     set_model_params(model, model_params_at_best_valid)
-    
     training_data_scores   = eval_metrics_on(predict(train_data,model), train_data)
     validation_data_scores = eval_metrics_on(predict(valid_data,model), valid_data)
     test_predictions = predict(test_data,model)
@@ -248,37 +234,10 @@ def train_model(model, train_data, valid_data, test_data,
 
 
 
-
-def plot_training_mse_evolution(data_lists, legend_names=[], ylabel = 'MSE', xlabel = 'training epoch', legend_location='best'):
-    
-    _colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k']
-    try:
-        figure = pyplot.figure()
-    except:
-        print('plot_training_mse_evolution:: Error: Cannot create figure')
-        return
-    ax  = figure.add_subplot(111)
-    ax.set_axisbelow(True)
-    if len(legend_names):
-        assert len(legend_names)==len(data_lists), 'you did not provide enough or too many labels for the graph'
-    ax.set_xlabel(xlabel, fontsize=15)
-    ax.set_ylabel(ylabel, fontsize=15)
-    pyplot.grid(b=True, which='major', color='lightgray', linestyle='--')
-    if len(legend_names) != len(data_lists):
-        legend_names = [' ' for x in data_lists]
-    for i, data in enumerate(data_lists):
-        assert len(data)==len(data_lists[0])
-        pyplot.plot(np.arange(1,len(data)+1), data, 
-                    _colors[i%len(_colors)], linestyle='-', marker='o', 
-                    markersize=5, markeredgewidth=0.5, linewidth=2.5, label=legend_names[i])
-    if len(legend_names[0]):
-        ax.legend(loc=legend_location, shadow=0, prop={'size':14}, numpoints=1)
     
     
     
-    
-    
-def crossvalidation_example(use_matrix_based_implementation = False, plot_training_mse = False):
+def crossvalidation_example(use_matrix_based_implementation = False):
     """
     Demonstration of data preprocessing, network configuration and (cross-validation) Training & testing
     
@@ -292,7 +251,7 @@ def crossvalidation_example(use_matrix_based_implementation = False, plot_traini
     
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~
-    num_epochs = 170
+    num_epochs = 2
     batchsize  = 20   #batch size for training
     L2_reg     = 4e-3
     batch_normalization = 0
@@ -302,7 +261,7 @@ def crossvalidation_example(use_matrix_based_implementation = False, plot_traini
     fp_depth = 3    # number of convolutional fingerprint layers
     #~~~~~~~~~~~~~~~~~~~~~~~~~
     n_hidden_units = 100
-    predictor_MLP_layers = [n_hidden_units, n_hidden_units, n_hidden_units]    
+    predictor_MLP_layers = [100, 500]
     #~~~~~~~~~~~~~~~~~~~~~~~~~
     
     
@@ -310,8 +269,32 @@ def crossvalidation_example(use_matrix_based_implementation = False, plot_traini
     crossval_total_num_splits = 3#10
     
     
-    # select the data that will be loaded or provide different data 
+    # select the data that will be loaded or provide different data
+    smilesarrays = []
+    
     data, labels = utils.filter_data(utils.load_delaney, data_cache_name='data/delaney')
+    maxlength = -1
+    chardict = {}
+    count = 1
+    for d in data:
+        if len(d) > maxlength:
+            maxlength = len(d)
+        for i in range(len(d)):
+            if d[i] not in chardict:
+                chardict[d[i]] = count
+                count = count + 1
+    for d in data:
+        coding = []
+        for i in range(len(d)):
+            coding.append(chardict[d[i]])
+        coding = np.pad(coding, (0, maxlength - len(d)), 'constant', constant_values=(0, 0))
+        temp = np.zeros((maxlength, len(chardict) + 1))
+        temp[np.arange(maxlength), coding] = 1
+        smilesarrays.append(temp)
+    smilesarrays = np.array(smilesarrays)
+
+
+
 #    data, labels = utils.filter_data(utils.load_Karthikeyan_MeltingPoints, data_cache_name='data/Karthikeyan_MeltingPoints')
     print('# of valid examples in data set:',len(data))
     
@@ -336,21 +319,23 @@ def crossvalidation_example(use_matrix_based_implementation = False, plot_traini
     
     for crossval_split_index in range(crossval_total_num_splits):
         print('\ncrossvalidation split',crossval_split_index+1,'of',crossval_total_num_splits)
-    
-        traindata, valdata, testdata = utils.cross_validation_split(data, labels, crossval_split_index=crossval_split_index, 
+        print(smilesarrays.shape)
+        traindata, valdata, testdata = utils.cross_validation_split(data, smilesarrays.reshape((1127, 98*33)), labels, crossval_split_index=crossval_split_index,
                                                                     crossval_total_num_splits=crossval_total_num_splits, 
                                                                     validation_data_ratio=0.1)
         
         
-        train, valid_data, test_data = data_preprocessing.preprocess_data_set_for_Model(traindata, valdata, testdata, 
+        train, valid_data, test_data = data_preprocessing.preprocess_data_set_for_Model(traindata, valdata, testdata,
                                                                      training_batchsize = batchsize, 
                                                                      testset_batchsize = 1000)
-        
-
+        print("B")
+        print (np.array(train[0][1]).shape)
+        print(labels.shape)
         model = fn_build_model(fp_length = fp_length, fp_depth = fp_depth, 
                                conv_width = conv_width, predictor_MLP_layers = predictor_MLP_layers, 
                                L2_reg = L2_reg, num_input_atom_features = 62, 
                                num_bond_features = 6, batch_normalization = batch_normalization)
+        
         
 
         
@@ -362,16 +347,6 @@ def crossvalidation_example(use_matrix_based_implementation = False, plot_traini
         test_scores.append(test_scores_at_valbest)
         all_test_predictions.append(test_predictions[:,0])
         all_test_labels.append(np.concatenate(map(lambda x:x[-1],test_data)))
-        
-        if plot_training_mse:
-            plot_training_mse_evolution(train_valid_mse_per_epoch, ['training set MSE (+regularizer)', 'validation set MSE'])
-            pyplot.draw()
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                pyplot.pause(0.0001)
-    
-    parity_plot(np.concatenate(all_test_predictions), np.concatenate(all_test_labels))
-    
     
 
 
@@ -399,13 +374,11 @@ def crossvalidation_example(use_matrix_based_implementation = False, plot_traini
     
 if __name__=='__main__':
     
-    
-    plot_training_mse = 0
-    
+        
     # Two implementations are available (they are equivalent): index_based and matrix_based. 
     # The index_based one is usually slightly faster.    
     
-    model = crossvalidation_example(use_matrix_based_implementation=0, plot_training_mse = plot_training_mse)
+    model = crossvalidation_example(use_matrix_based_implementation=1)
     
     
     # to save the model weights use e.g.:
@@ -419,8 +392,6 @@ if __name__=='__main__':
     # beware that this requires the 'graphviz' software!
     save_model_visualization(model, filename = 'fingerprintmodel.png')
 
-
-    pyplot.show()
 
 
 

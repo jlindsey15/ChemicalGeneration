@@ -65,7 +65,7 @@ def extract_bondfeatures_of_neighbors_by_degree(array_rep):
 
 
 
-def _preprocess_data(smiles, labels, batchsize = 100):
+def _preprocess_data(smiles, labels, reg_labels, batchsize = 100):
     """
     prepares all input batches to train/test the GDNN fingerprints implementation
     """
@@ -77,6 +77,7 @@ def _preprocess_data(smiles, labels, batchsize = 100):
     for i in range(int(np.ceil(N*1./batchsize))):
         array_rep = utils.array_rep_from_smiles(smiles[i*batchsize:min(N,(i+1)*batchsize)])
         labels_b = labels[i*batchsize:min(N,(i+1)*batchsize)]
+        reg_labels_b = reg_labels[i*batchsize:min(N,(i+1)*batchsize)]
         atom_features = array_rep['atom_features']
 
         summed_bond_features_by_degree = extract_bondfeatures_of_neighbors_by_degree(array_rep)
@@ -126,7 +127,7 @@ def _preprocess_data(smiles, labels, batchsize = 100):
             batch_dict['bond_features_degree_'+str(missing_degree)] = np.zeros((0, num_bond_features),'float32')
             batch_dict['atom_features_selector_matrix_degree_'+str(missing_degree)] = np.zeros((0, num_atoms),'float32') 
             batch_dict['atom_batch_matching_matrix_degree_'+str(missing_degree)] = atom_batch_matching_matrix.T
-        batches.append((batch_dict,labels_b))
+        batches.append((batch_dict,labels_b, reg_labels_b))
     return batches
 
 
@@ -135,9 +136,9 @@ def _preprocess_data(smiles, labels, batchsize = 100):
 
 def preprocess_data_set_for_Model(traindata, valdata, testdata, training_batchsize = 50, testset_batchsize = 1000):
     
-    train = _preprocess_data(traindata[0], traindata[1], training_batchsize)
-    validation = _preprocess_data(valdata[0],  valdata[1],  testset_batchsize )
-    test = _preprocess_data(testdata[0], testdata[1], testset_batchsize )
+    train = _preprocess_data(traindata[0], traindata[1], traindata[2], training_batchsize)
+    validation = _preprocess_data(valdata[0],  valdata[1], valdata[2], testset_batchsize )
+    test = _preprocess_data(testdata[0], testdata[1], testdata[2], testset_batchsize )
     
     return train, validation, test
 
