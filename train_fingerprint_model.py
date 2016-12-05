@@ -51,6 +51,8 @@ def predict(data, model):
 
 def eval_metrics_on(predictions, labels):
     print(predictions.shape)
+    labels = labels.flatten()
+
     '''
     assuming this is a regression task; labels are continuous-valued floats
     
@@ -58,19 +60,11 @@ def eval_metrics_on(predictions, labels):
     
         r2, mean_abs_error, mse, rmse, median_absolute_error, explained_variance_score
     '''
-    if len(labels[0])==2: #labels is list of data/labels pairs
-        labels = np.concatenate([l[1] for l in labels])
-    predictions = predictions[:,0]
     
-    r2                       = metrics.r2_score(labels, predictions)
     mean_abs_error           = np.abs(predictions - labels).mean()
     mse                      = ((predictions - labels)**2).mean()
     rmse                     = np.sqrt(mse)
-    median_absolute_error    = metrics.median_absolute_error(labels, predictions) # robust to outliers
-    explained_variance_score = metrics.explained_variance_score(labels, predictions) # best score = 1, lower is worse
-    return {'r2':r2, 'mean_abs_error':mean_abs_error, 'mse':mse, 'rmse':rmse, 
-            'median_absolute_error':median_absolute_error, 
-            'explained_variance_score':explained_variance_score}
+    return {'mean_abs_error':mean_abs_error, 'mse':mse, 'rmse':rmse}
     
 
 
@@ -217,10 +211,23 @@ def train_model(model, train_data, valid_data, test_data,
     #test_end   = test_on(test_data, model,'test  mse (final):     ')
     
     set_model_params(model, model_params_at_best_valid)
-    training_data_scores   = eval_metrics_on(predict(train_data,model), train_data)
-    validation_data_scores = eval_metrics_on(predict(valid_data,model), valid_data)
+    train_labels = []
+    for d in train_data:
+        train_labels.append(d[2])
+    train_labels = np.array(train_labels)
+    val_labels = []
+    for d in valid_data:
+        val_labels.append(d[2])
+    val_labels = np.array(val_labels)
+    test_labels = []
+    for d in test_data:
+        test_labels.append(d[2])
+    test_labels = np.array(test_labels)
+
+    training_data_scores   = eval_metrics_on(predict(train_data,model), train_labels)
+    validation_data_scores = eval_metrics_on(predict(valid_data,model), val_labels)
     test_predictions = predict(test_data,model)
-    test_data_scores       = eval_metrics_on(test_predictions, test_data)
+    test_data_scores       = eval_metrics_on(test_predictions, test_labels)
     
     
     print('training set mse (best_val):  ', lim(training_data_scores['mse']))
@@ -345,7 +352,8 @@ def crossvalidation_example(use_matrix_based_implementation = False):
         val_mse.append(val_scores_best['mse'])
         test_mse.append(test_scores_at_valbest['mse'])
         test_scores.append(test_scores_at_valbest)
-        all_test_predictions.append(test_predictions[:,0])
+        
+        all_test_predictions.append(test_predictions[0])
         all_test_labels.append(np.concatenate(map(lambda x:x[-1],test_data)))
     
 
